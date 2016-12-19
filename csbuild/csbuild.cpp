@@ -7,9 +7,6 @@
 #include <set>
 #include <vector>
 #include <fstream>
-#include <sstream>
-#include <codecvt>
-#include <locale>
 //#include <thread>
 //#include <mutex>	// why, why this ide don't support thread in c++11
 
@@ -42,10 +39,9 @@ typedef struct _PROCESS_BASIC_INFORMATION
 
 
 static set<pair<int, string> > previouses; /* pid X string */
-static int NUM_TARGET_FILES = 5;
-static string TARGET_FILES[] = { "CL.EXE", "LINK.EXE", "GCC", "G++", "MAKE" };
+static int NUM_TARGET_FILES = 4;
+static string TARGET_FILES[] = { "CL.EXE", "LINK.EXE", "GCC", "G++" };
 bool searchProcessesStop;
-
 
 
 PVOID GetPebAddress(HANDLE ProcessHandle)
@@ -67,7 +63,7 @@ string ToUpperCase(const string&  str, const std::locale&  loc = std::locale::cl
 	return upperCaseStr;
 }
 
-bool IsInterestProcessByName(const string& processName) {
+bool IsInterestProcess(const string& processName) {
 	for (int i = 0; i < NUM_TARGET_FILES; ++i) {
 		if (processName.find(TARGET_FILES[i]) != string::npos) {
 			return true;
@@ -76,7 +72,23 @@ bool IsInterestProcessByName(const string& processName) {
 	return false;
 }
 
-bool IsInterestProcess(DWORD processID)
+bool IsGCCProcess(const string& processName) {
+	if (processName.find("GCC") != string::npos
+		|| processName.find("G++") != string::npos) {
+		return true;
+	}
+	return false;
+}
+
+bool IsVisualStudioProcess(const string& processName) {
+	if (processName.find("CL.EXE") != string::npos
+		|| processName.find("LINK.EXE") != string::npos) {
+		return true;
+	}
+	return false;
+}
+
+string GetProcessName(DWORD processID)
 {
 	TCHAR szProcessName[MAX_PATH] = TEXT("<unknown>");
 
@@ -84,6 +96,8 @@ bool IsInterestProcess(DWORD processID)
 	HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION |
 		PROCESS_VM_READ,
 		FALSE, processID);
+
+	string processName;
 
 	/* Get the process name. */
 	if (NULL != hProcess)
@@ -105,19 +119,9 @@ bool IsInterestProcess(DWORD processID)
 	/* Release the handle to the process. */
 	CloseHandle(hProcess);
 
-	string binaryName(szProcessName);
-	string processName = ToUpperCase(binaryName);
+	processName = szProcessName;
 
-	return IsInterestProcessByName(processName);
-
-	/*
-	if(name.find("CL.EXE") != string::npos
-	|| name.find("LINK.EXE") != string::npos
-	|| name.find("GCC.EXE") != string::npos
-	|| name.find("G++.EXE") != string::npos
-	){
-	return true;
-	}*/
+	return processName;
 }
 
 string GetCommandLine(int pid){
@@ -198,114 +202,87 @@ bool IsSearched(const int pid, const string& processContents) {
 extern vector<int> GetAllProcessId(){
 	DWORD aProcesses[1024], cbNeeded, cProcesses;
 
-	vector<int> v;
+	vector<int> pids;
 	if (!EnumProcesses(aProcesses, sizeof(aProcesses), &cbNeeded))
 	{
-		return v;
+		return pids;
 	}
 
 	cProcesses = cbNeeded / sizeof(DWORD);
 	for (unsigned i = 0; i < cProcesses; i++)
 	{
-		v.push_back(aProcesses[i]);
+		pids.push_back(aProcesses[i]);
 	}
 
-	return v;
+	return pids;
 }
 
-string ToUtf8(wstring str)
-{
-	std::string ret;
-	int len = WideCharToMultiByte(CP_UTF8, 0, str.c_str(), str.length(), NULL, 0, NULL, NULL);
-	if (len > 0)
-	{
-		ret.resize(len);
-		WideCharToMultiByte(CP_UTF8, 0, str.c_str(), str.length(), &ret[0], len, NULL, NULL);
+wstring ReadOneLine(FILE *File){
+	wchar_t lineOfChars[512];
+	wstring line;
+
+	fgetws(lineOfChars, 512, File);
+	line.append(lineOfChars);
+
+	return line;
+}
+
+string GetRSPFileContents(const string& processContents) {
+	int fileFlagIndex = processContents.find('@');
+	string fileName = processContents.substr(fileFlagIndex + 1); /* from @ to end : filename except '@' itself */
+	wstring fileNameUtf8(fileName.begin(), fileName.end());
+	
+	FILE *file;
+	wstring wLineContents;
+	string lineContents;
+
+	_wfopen_s(&file, fileNameUtf8.c_str(), L"r,ccs=UTF-16LE");
+	while (!feof(file) && !ferror(file)){
+		wLineContents.append(ReadOneLine(file));
 	}
-	return ret;
-}
+	fclose(file);
 
-wstring ReadOneLine(FILE *File, wstring Line){
+	lineContents = string(wLineContents.begin(), wLineContents.end());
 
-	wchar_t LineOfChars[512];
-	fgetws(LineOfChars, 512, File);
-
-	Line.clear();
-	Line.append(LineOfChars);
-
-	return Line;
+	return lineContents;
 }
 
 DWORD WINAPI SearchProcessThread(LPVOID lpParam) {
+	vector<int> processIDs;
+	unsigned int i;
+
+	string processName;
+	string processContents;
+	string rspFileContents;
+
 	while (!searchProcessesStop) {
-		int pid;
-
-		DWORD aProcesses[1024], cbNeeded, cProcesses;
-		unsigned int i;
-		string processContents;
-
-		if (!EnumProcesses(aProcesses, sizeof(aProcesses), &cbNeeded))
-		{
-			continue;
-		}
-
-		/* Calculate how many process identifiers were returned. */
-		cProcesses = cbNeeded / sizeof(DWORD);
+		processIDs = GetAllProcessId();
 
 		/* Print the name and process identifier for each process. */
-		for (i = 0; i < cProcesses; i++)
+		for ( i = 0; i < processIDs.size(); ++i)
 		{
-			if (aProcesses[i] != 0 && IsInterestProcess(aProcesses[i]))
-			{
-				pid = aProcesses[i];
-				processContents = GetCommandLine(pid);
-				if (!IsSearched(pid, processContents)) {
+			processName = ToUpperCase(GetProcessName(processIDs[i]));
+
+			if ( IsInterestProcess(processName) ) {
+				processContents = GetCommandLine(processIDs[i]);
+				if ( !IsSearched(processIDs[i], processContents) ) {
 					
-					cout << i << " " << processContents << endl;
-				/*	int index = processContents.find('@');
-					string fileName = processContents.substr(index + 1);
+					if ( IsGCCProcess(processName) ) {
+						cout << processIDs[i] << " " << processContents << endl;
 
-					wstring fileNameUtf8(fileName.begin(), fileName.end());
-
-					FILE *file;
-					wstring line;
-
-					ofstream fout("output.out", ios::app);
-
-					_wfopen_s(&file, fileNameUtf8.c_str(), L"r,ccs=UTF-16LE");
-
-					while (!feof(file) && !ferror(file)){
-						line = ReadOneLine(file, line);
-						wcout << line;
-						string linew(line.begin(), line.end());
-
-						fout << linew;
+						/* parsing codes here; should be function call(or class member function call) */
 					}
 
-					fclose(file);*/
+					if ( IsVisualStudioProcess(processName) ) {
+						rspFileContents = GetRSPFileContents(processContents);
+						cout << processIDs[i] << " " << rspFileContents << endl;
 
-					//ifstream in(fileName);
-					//in.imbue(locale(locale::empty(), new codecvt_utf8<wchar_t>));
+						/* parsing codes here; should be function call(or class member function call) */
 
-					//stringstream ss;
-					//ss << in.rdbuf();
-					//
-					//string utf8FileName = ss.str();
-			/*		wstring fileNameUtf8(fileName.begin(), fileName.end());
-
-					wifstream fin(fileNameUtf8);
-					wstring buff;
-					wofstream fout("output.out", ios::app);
-
-					while ( getline(fin, buff) ) {
-
-						wcout << buff;
-						fout << buff;
+						ofstream fout("output.out", ios::app);
+						fout << rspFileContents << endl; // don't work
 					}
-					fout << endl;
-					wcout << endl;
-				*/	
-					SetProcessKeyTrue(pid, processContents);
+					SetProcessKeyTrue(processIDs[i], processContents);
 				}
 			}
 		}
@@ -326,12 +303,11 @@ void StartCompileProcess(string& processName, PROCESS_INFORMATION& pi) {
 
 int wmain(int argc, WCHAR *argv[])
 {
-//	std::locale::global(std::locale("ko_KR.UTF-8"));
-
 	searchProcessesStop = false;
 	while (true) {
 		SearchProcessThread(NULL);
 	}
+
 	//if (argc < 2) {
 	//	cout << "usage : " << endl;
 	//	return -1;
