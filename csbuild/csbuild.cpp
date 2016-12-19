@@ -303,49 +303,53 @@ void StartCompileProcess(string& processName, PROCESS_INFORMATION& pi) {
 
 int wmain(int argc, WCHAR *argv[])
 {
-	searchProcessesStop = false;
+	/*searchProcessesStop = false;
 	while (true) {
 		SearchProcessThread(NULL);
+	}*/
+
+	if (argc < 2) {
+		cout << "usage : csbuild [compiler] [flags]" << endl;
+		return -1;
 	}
 
-	//if (argc < 2) {
-	//	cout << "usage : " << endl;
-	//	return -1;
-	//}
+	searchProcessesStop = false;
 
-	//searchProcessesStop = false;
+	// make thread
+	//thread toThread(&SearchProcessThread);
+	//toThread.detach();
+	DWORD searchThreadID = 0;
+	HANDLE searchThreadHandle = CreateThread(NULL, 0, SearchProcessThread, NULL, 0, &searchThreadID);
+	if (searchThreadHandle == NULL) {
+		cout << "CreateThread() failed, error : " << GetLastError() << endl;
+	}
+	if (CloseHandle(searchThreadHandle) == 0) {
+		cout << "Handle to thread close error : " << GetLastError() << endl;
+	}
 
-	//// make thread
-	////thread toThread(&SearchProcessThread);
-	////toThread.detach();
-	//DWORD searchThreadID = 0;
-	//HANDLE searchThreadHandle = CreateThread(NULL, 0, SearchProcessThread, NULL, 0, &searchThreadID);
-	//if (searchThreadHandle == NULL) {
-	//	cout << "CreateThread() failed, error : " << GetLastError() << endl;
-	//}
-	//if (CloseHandle(searchThreadHandle) == 0) {
-	//	cout << "Handle to thread close error : " << GetLastError() << endl;
-	//}
+	// argv[1] parse
+	wstring ws(argv[1]);
+	string tmp(ws.begin(), ws.end());
+	string processName = ToUpperCase(tmp);
 
-	//// argv[1] parse
-	//wstring ws(argv[1]);
-	//string tmp(ws.begin(), ws.end());
-	//string processName = ToUpperCase(tmp);
+	for (int i = 2; i < argc; i++) {
+		wstring ws(argv[i]);
+		string test(ws.begin(), ws.end());
+		if (test[0] == '/' || test[0] == '-') {
+			processName.append(" ");
+			processName.append(test);
+		} else {
+			processName.append(" \"");
+			processName.append(test);
+			processName.append("\"");
+		}
+			
+	}
 
-	//if (IsInterestProcessByName(processName)) {
-	//	for (int i = 2; i < argc; i++) {
-	//		wstring ws(argv[i]);
-	//		string test(ws.begin(), ws.end());
-	//		processName.append(" \"");
-	//		processName.append(test);
-	//		processName.append("\"");
-	//	}
-	//	PROCESS_INFORMATION pi;
-
-	//	StartCompileProcess(processName, pi);
-	//	WaitForSingleObject(pi.hProcess, INFINITE);
-	//	searchProcessesStop = true;
-	//}
-	////make process argv[1]
+	//make process argv[1]
+	PROCESS_INFORMATION pi;	
+	StartCompileProcess(processName, pi);
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	searchProcessesStop = true;
 			
 }
