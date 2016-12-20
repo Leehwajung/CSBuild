@@ -314,7 +314,7 @@ DWORD WINAPI SearchProcessThread(LPVOID lpParam) {
 
 				if ( !IsSearched(processIDs[i], processContents[0]) ) {
 					if ( IsGCCProcess(processName) ) {
-						cout << processIDs[i] << " " << processContents[1] << endl;
+					//	cout << processIDs[i] << " " << processContents[1] << endl;
 					//	cout << processContents[0] << endl;
 
 						/* gcc parsing part start */
