@@ -91,9 +91,15 @@ bool IsGCCProcess(const string& processName) {
 	return false;
 }
 
-bool IsVisualStudioProcess(const string& processName) {
-	if (processName.find("CL.EXE") != string::npos
-		|| processName.find("LINK.EXE") != string::npos) {
+bool IsClexeProcess(const string& processName) {
+	if (processName.find("CL.EXE") != string::npos) {
+		return true;
+	}
+	return false;
+}
+
+bool IsLinkexeProcess(const string& processName) {
+	if (processName.find("LINK.EXE") != string::npos) {
 		return true;
 	}
 	return false;
@@ -267,7 +273,8 @@ wstring ReadOneLine(FILE *File){
 
 string GetRSPFileContents(const string& processContents) {
 	int fileFlagIndex = processContents.find('@');
-	string fileName = processContents.substr(fileFlagIndex + 1); /* from @ to end : filename except '@' itself */
+	int endFileIndex = processContents.find(".rsp");
+	string fileName = processContents.substr(fileFlagIndex + 1, endFileIndex + 3 - fileFlagIndex); /* from @ to end : filename except '@' itself */
 	wstring fileNameUtf8(fileName.begin(), fileName.end());
 	
 	FILE *file;
@@ -316,15 +323,29 @@ DWORD WINAPI SearchProcessThread(LPVOID lpParam) {
 						/* gcc parsing part end */
 					}
 
-					if ( IsVisualStudioProcess(processName) ) {
-						cout << processIDs[i] << " " << processContents[1] << endl;	//working directory
-						cout << processContents[0] << endl;	//rsp file address : @...
+					if ( IsClexeProcess(processName) ) {
+						//cout << processIDs[i] << " " << processContents[1] << endl;	//working directory
+						//cout << processContents[0] << endl;	//rsp file address : @...
 
 						rspFileContents = GetRSPFileContents(processContents[0]);
-						cout << processIDs[i] << " " << rspFileContents << endl;	//rsp file content
+						//cout << processIDs[i] << " " << rspFileContents << endl;	//rsp file content
 
 						/* parsing codes here; should be function call(or class member function call) */
-						rspParser.parseRsp(rspFileContents);
+						rspParser.parseClexe(processContents[1], processContents[0], rspFileContents);
+
+						//ofstream fout("output.out", ios::app);
+						//fout << rspFileContents << endl; // don't work
+					}
+
+					if ( IsLinkexeProcess(processName) ) {
+						//cout << processIDs[i] << " " << processContents[1] << endl;	//working directory
+						//cout << processContents[0] << endl;	//rsp file address : @...
+
+						rspFileContents = GetRSPFileContents(processContents[0]);
+						//cout << processIDs[i] << " " << rspFileContents << endl;	//rsp file content
+
+						/* parsing codes here; should be function call(or class member function call) */
+						rspParser.parseLinkexe(processContents[1], rspFileContents);
 
 						//ofstream fout("output.out", ios::app);
 						//fout << rspFileContents << endl; // don't work
@@ -353,7 +374,7 @@ int wmain(int argc, WCHAR *argv[])
 	searchProcessesStop = false;
 	SearchProcessThread(NULL);
 
-	rspParser.printResult();
+	//rspParser.printResult();
 
 	//if (argc < 2) {
 	//	cout << "usage : " << endl;
