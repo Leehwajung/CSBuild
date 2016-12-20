@@ -8,7 +8,7 @@
 #include <vector>
 #include <fstream>
 #include "RspParser.h"
-//#include "GccParser.h"
+#include "GccParser.h"
 //#include <thread>
 //#include <mutex>	// why, why this ide don't support thread in c++11
 
@@ -51,7 +51,7 @@ static set<pair<int, string> > previouses; /* pid X string */
 static int NUM_TARGET_FILES = 4;
 static string TARGET_FILES[] = { "CL.EXE", "LINK.EXE", "GCC", "G++" };
 bool searchProcessesStop;
-//GccParser gccParser;
+GccParser gccParser;
 RspParser rspParser;
 
 
@@ -308,10 +308,12 @@ DWORD WINAPI SearchProcessThread(LPVOID lpParam) {
 				if ( !IsSearched(processIDs[i], processContents[0]) ) {
 					if ( IsGCCProcess(processName) ) {
 						cout << processIDs[i] << " " << processContents[1] << endl;
-						cout << processContents[0] << endl;
+					//	cout << processContents[0] << endl;
 
-						//gccParser.setCompileInfo(processContents[0]);
-						/* parsing codes here; should be function call(or class member function call) */
+						/* gcc parsing part start */
+						gccParser.setBuildLocation(processContents[1]);
+						gccParser.addCompileInfo(processContents[0]);
+						/* gcc parsing part end */
 					}
 
 					if ( IsVisualStudioProcess(processName) ) {
