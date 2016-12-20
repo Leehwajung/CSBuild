@@ -8,12 +8,16 @@
 #include <map>
 using namespace std;
 
+const vector<string> COMPILER_NAMES = { "GCC", "G++" };
+const vector<string> SOURCE_FILE_EXTENSIONS = { ".CPP", ".C" };
+
+
 class GccParser
 {
 public:
 	GccParser();
 	~GccParser();
-	
+
 	/* compile infos getter, setter */
 	const string getProjectName() const { return projectName; }
 	const string getLinkFlag() const { return linkFlags; }
@@ -35,10 +39,7 @@ public:
 private:
 	string toUpperCase(const string& str);
 
-	bool isCompilerCall(const string& command);
-	bool isSourceFiie(const string& command);
-	bool isObjectFiie(const string& command);
-	bool isExecutableFiie(const string& command);
+	bool isCommandContains(const string& command, const vector<string>& targets);
 
 	string extractProjectName(const string& str);
 	vector<string> split(const string& str, const char& delim);

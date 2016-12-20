@@ -28,16 +28,13 @@ void GccParser::addCompileInfo(const string& rareCompileInfo) {
 
 	/* split into source files and compile flags */
 	for (vector<string>::const_iterator it = tokens.begin(); it != tokens.end(); ++it) {
-		if (isCompilerCall(*it)) {
+		if (isCommandContains(*it, COMPILER_NAMES)) {
 			continue;
 		}
 
-		if (isSourceFiie(*it)) {
+		if (isCommandContains(*it, SOURCE_FILE_EXTENSIONS)) {
 			sources.push_back(*it);
 		}
-		//else if (isExecutableFiie(*it)) {
-
-		//}
 		else {
 			if (!compileFlag.empty()) {
 				compileFlag.append(" ");
@@ -46,6 +43,7 @@ void GccParser::addCompileInfo(const string& rareCompileInfo) {
 		}
 	}
 
+	/* set pids and flags */
 	for (int i = 0; i < sources.size(); ++i) {
 		string key = sources[i];
 		sourceFiles[key] = compileFlag;
@@ -100,7 +98,7 @@ string GccParser::toUpperCase(const string& str) {
 	return result;
 }
 
-bool GccParser::isCompilerCall(const string& command) {
+bool GccParser::isCommandContains(const string& command, const vector<string>& targets) {
 	string toFirstPointFromReverse = "";
 	string extension;
 
@@ -111,62 +109,11 @@ bool GccParser::isCompilerCall(const string& command) {
 		toFirstPointFromReverse = (*rit) + toFirstPointFromReverse;
 	}
 	extension = toUpperCase(toFirstPointFromReverse);
-	if ((extension == "GCC") || (extension == "G++")) {
-		return true;
-	}
 
-	return false;
-}
-
-bool GccParser::isSourceFiie(const string& command) {
-	string toFirstPointFromReverse = "";
-	string extension;
-
-	for (string::const_reverse_iterator rit = command.rbegin(); rit != command.rend(); ++rit) {
-		if (*rit == '.') {
-			break;
+	for (vector<string>::const_iterator it = targets.begin(); it != targets.end(); ++it) {
+		if (*it == extension) {
+			return true;
 		}
-		toFirstPointFromReverse = (*rit) + toFirstPointFromReverse;
-	}
-	extension = toUpperCase(toFirstPointFromReverse);
-	if ( (extension == "CPP") || (extension == "C") ) {
-		return true;
-	}
-
-	return false;
-}
-
-bool GccParser::isObjectFiie(const string& command) {
-	string toFirstPointFromReverse = "";
-	string extension;
-
-	for (string::const_reverse_iterator rit = command.rbegin(); rit != command.rend(); ++rit) {
-		if (*rit == '.') {
-			break;
-		}
-		toFirstPointFromReverse = (*rit) + toFirstPointFromReverse;
-	}
-	extension = toUpperCase(toFirstPointFromReverse);
-	if ((extension == "O")) {
-		return true;
-	}
-
-	return false;
-}
-
-bool GccParser::isExecutableFiie(const string& command) {
-	string toFirstPointFromReverse = "";
-	string extension;
-
-	for (string::const_reverse_iterator rit = command.rbegin(); rit != command.rend(); ++rit) {
-		if (*rit == '.') {
-			break;
-		}
-		toFirstPointFromReverse = (*rit) + toFirstPointFromReverse;
-	}
-	extension = toUpperCase(toFirstPointFromReverse);
-	if ((extension == "EXE")) {
-		return true;
 	}
 
 	return false;
