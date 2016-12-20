@@ -7,7 +7,8 @@
 #include <set>
 #include <vector>
 #include <fstream>
-#include "GccParser.h"
+#include "RspParser.h"
+//#include "GccParser.h"
 //#include <thread>
 //#include <mutex>	// why, why this ide don't support thread in c++11
 
@@ -50,7 +51,8 @@ static set<pair<int, string> > previouses; /* pid X string */
 static int NUM_TARGET_FILES = 4;
 static string TARGET_FILES[] = { "CL.EXE", "LINK.EXE", "GCC", "G++" };
 bool searchProcessesStop;
-GccParser gccParser;
+//GccParser gccParser;
+RspParser rspParser;
 
 
 PVOID GetPebAddress(HANDLE ProcessHandle)
@@ -308,21 +310,22 @@ DWORD WINAPI SearchProcessThread(LPVOID lpParam) {
 						cout << processIDs[i] << " " << processContents[1] << endl;
 						cout << processContents[0] << endl;
 
-						gccParser.setCompileInfo(processContents[0]);
+						//gccParser.setCompileInfo(processContents[0]);
 						/* parsing codes here; should be function call(or class member function call) */
 					}
 
 					if ( IsVisualStudioProcess(processName) ) {
-						cout << processIDs[i] << " " << processContents[1] << endl;
-						cout << processContents[0] << endl;
+						cout << processIDs[i] << " " << processContents[1] << endl;	//working directory
+						cout << processContents[0] << endl;	//rsp file address : @...
 
 						rspFileContents = GetRSPFileContents(processContents[0]);
-						cout << processIDs[i] << " " << rspFileContents << endl;
+						cout << processIDs[i] << " " << rspFileContents << endl;	//rsp file content
 
 						/* parsing codes here; should be function call(or class member function call) */
+						rspParser.parseRsp(rspFileContents);
 
-						ofstream fout("output.out", ios::app);
-						fout << rspFileContents << endl; // don't work
+						//ofstream fout("output.out", ios::app);
+						//fout << rspFileContents << endl; // don't work
 					}
 					SetProcessKeyTrue(processIDs[i], processContents[0]);
 				}
@@ -346,9 +349,9 @@ void StartCompileProcess(string& processName, PROCESS_INFORMATION& pi) {
 int wmain(int argc, WCHAR *argv[])
 {
 	searchProcessesStop = false;
-	while (true) {
-		SearchProcessThread(NULL);
-	}
+	SearchProcessThread(NULL);
+
+	rspParser.printResult();
 
 	//if (argc < 2) {
 	//	cout << "usage : " << endl;
