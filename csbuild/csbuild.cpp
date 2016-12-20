@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <stdio.h>
 #include <psapi.h>
 #include <iostream>
@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 #include <fstream>
+#include "GccParser.h"
 //#include <thread>
 //#include <mutex>	// why, why this ide don't support thread in c++11
 
@@ -20,13 +21,6 @@ typedef NTSTATUS(NTAPI *_NtQueryInformationProcess)(
 	PDWORD ReturnLength
 	);
 
-typedef struct _UNICODE_STRING
-{
-	USHORT Length;
-	USHORT MaximumLength;
-	PWSTR Buffer;
-} UNICODE_STRING, *PUNICODE_STRING;
-
 typedef struct _PROCESS_BASIC_INFORMATION
 {
 	LONG ExitStatus;
@@ -38,10 +32,25 @@ typedef struct _PROCESS_BASIC_INFORMATION
 } PROCESS_BASIC_INFORMATION, *PPROCESS_BASIC_INFORMATION;
 
 
+typedef struct _UNICODE_STRING {
+	USHORT Length;
+	USHORT MaximumLength;
+	PWSTR  Buffer;
+} UNICODE_STRING;
+
+typedef struct _CURDIR
+{
+	UNICODE_STRING    DosPath;
+	HANDLE            Handle;
+} CURDIR;
+
+
+
 static set<pair<int, string> > previouses; /* pid X string */
 static int NUM_TARGET_FILES = 4;
 static string TARGET_FILES[] = { "CL.EXE", "LINK.EXE", "GCC", "G++" };
 bool searchProcessesStop;
+GccParser gccParser;
 
 
 PVOID GetPebAddress(HANDLE ProcessHandle)
@@ -111,6 +120,13 @@ string GetProcessName(DWORD processID)
 			GetModuleBaseName(hProcess, hMod, szProcessName,
 				sizeof(szProcessName) / sizeof(TCHAR));
 		}
+
+		// get process working directory
+		PROCESS_BASIC_INFORMATION pbi;
+		DWORD len;
+
+		(hProcess, 0, &pbi, sizeof(PROCESS_BASIC_INFORMATION), &len);
+
 	}
 
 	/* Print the process name and identifier. */
@@ -124,14 +140,41 @@ string GetProcessName(DWORD processID)
 	return processName;
 }
 
-string GetCommandLine(int pid){
+string GetStringContentsByUnicodeString(HANDLE processHandle, UNICODE_STRING unicodeString) {
+	WCHAR *wStringContents;
+	char * cStringContents;
+	string stringContents;
+
+	/* allocate memory to hold the command line */
+	wStringContents = (WCHAR *)malloc(unicodeString.Length);
+	cStringContents = (char *)malloc(unicodeString.Length * 2);
+
+	/* read the command line */
+	if (!ReadProcessMemory(processHandle, unicodeString.Buffer,
+		wStringContents, unicodeString.Length, NULL))
+	{
+		return "";
+	}
+
+	/* print it */
+	/* the length specifier is in characters, but commandLine.Length is in bytes */
+	/* a WCHAR is 2 bytes */
+	sprintf(cStringContents, "%.*S", unicodeString.Length / 2, wStringContents);
+	stringContents = cStringContents;
+
+	return stringContents;
+}
+
+/* contents[0] : commandline, contents[1] : working directory */
+vector<string> GetProcessContents(int pid){
 	HANDLE processHandle;
 	PVOID pebAddress;
-	PVOID rtlUserProcParamsAddress;
+	LPVOID rtlUserProcParamsAddress;
+
+	UNICODE_STRING workingDirectory;
 	UNICODE_STRING commandLine;
-	WCHAR *commandLineContents;
-	char * rcommandLineContents;
-	string strCommandLineContents;
+
+	vector<string> contents;
 
 	if ((processHandle = OpenProcess(
 		PROCESS_QUERY_INFORMATION | /* required for NtQueryInformationProcess */
@@ -139,7 +182,7 @@ string GetCommandLine(int pid){
 		FALSE, pid)) == 0)
 	{
 		printf("Could not open process!\n");
-		return "";
+		return vector<string>();
 	}
 
 	pebAddress = GetPebAddress(processHandle);
@@ -149,40 +192,33 @@ string GetCommandLine(int pid){
 		&rtlUserProcParamsAddress, sizeof(PVOID), NULL))
 	{
 		printf("Could not read the address of ProcessParameters!\n");
-		return "";
+		return vector<string>();
 	}
-
+	
+	/* read the WorkingDirectory UNICODE_STRING structure */
+	if (!ReadProcessMemory(processHandle, (PCHAR)rtlUserProcParamsAddress + 0x24,
+		&workingDirectory, sizeof(workingDirectory), NULL))
+	{
+		return vector<string>();
+	}
+	
 	/* read the CommandLine UNICODE_STRING structure */
 	if (!ReadProcessMemory(processHandle, (PCHAR)rtlUserProcParamsAddress + 0x40,
 		&commandLine, sizeof(commandLine), NULL))
 	{
-		return "";
+		return vector<string>();
 	}
 
 	/* allocate memory to hold the command line */
-	commandLineContents = (WCHAR *)malloc(commandLine.Length);
-	rcommandLineContents = (char *)malloc(commandLine.Length * 2);
 
-	/* read the command line */
-	if (!ReadProcessMemory(processHandle, commandLine.Buffer,
-		commandLineContents, commandLine.Length, NULL))
-	{
-		return "";
-	}
+	contents.push_back( GetStringContentsByUnicodeString(processHandle, commandLine) );
+	contents.push_back( GetStringContentsByUnicodeString(processHandle, workingDirectory) );
 
-	/* print it */
-	/* the length specifier is in characters, but commandLine.Length is in bytes */
-	/* a WCHAR is 2 bytes */
-	sprintf(rcommandLineContents, "%.*S", commandLine.Length / 2, commandLineContents);
 	CloseHandle(processHandle);
 
-	strCommandLineContents = rcommandLineContents;
-
-	free(commandLineContents);
-	free(rcommandLineContents);
-
-	return strCommandLineContents;
+	return contents;
 }
+
 
 void SetProcessKeyTrue(const int pid, const string& processContents) {
 	pair<int, string> key = make_pair(pid, processContents);
@@ -252,7 +288,7 @@ DWORD WINAPI SearchProcessThread(LPVOID lpParam) {
 	unsigned int i;
 
 	string processName;
-	string processContents;
+	vector<string> processContents; /* contents[0] : commandline, contents[1] : working directory */
 	string rspFileContents;
 
 	while (!searchProcessesStop) {
@@ -264,17 +300,23 @@ DWORD WINAPI SearchProcessThread(LPVOID lpParam) {
 			processName = ToUpperCase(GetProcessName(processIDs[i]));
 
 			if ( IsInterestProcess(processName) ) {
-				processContents = GetCommandLine(processIDs[i]);
-				if ( !IsSearched(processIDs[i], processContents) ) {
-					
-					if ( IsGCCProcess(processName) ) {
-						cout << processIDs[i] << " " << processContents << endl;
+				/* contents[0] : commandline, contents[1] : working directory */
+				processContents = GetProcessContents(processIDs[i]);
 
+				if ( !IsSearched(processIDs[i], processContents[0]) ) {
+					if ( IsGCCProcess(processName) ) {
+						cout << processIDs[i] << " " << processContents[1] << endl;
+						cout << processContents[0] << endl;
+
+						gccParser.setCompileInfo(processContents[0]);
 						/* parsing codes here; should be function call(or class member function call) */
 					}
 
 					if ( IsVisualStudioProcess(processName) ) {
-						rspFileContents = GetRSPFileContents(processContents);
+						cout << processIDs[i] << " " << processContents[1] << endl;
+						cout << processContents[0] << endl;
+
+						rspFileContents = GetRSPFileContents(processContents[0]);
 						cout << processIDs[i] << " " << rspFileContents << endl;
 
 						/* parsing codes here; should be function call(or class member function call) */
@@ -282,7 +324,7 @@ DWORD WINAPI SearchProcessThread(LPVOID lpParam) {
 						ofstream fout("output.out", ios::app);
 						fout << rspFileContents << endl; // don't work
 					}
-					SetProcessKeyTrue(processIDs[i], processContents);
+					SetProcessKeyTrue(processIDs[i], processContents[0]);
 				}
 			}
 		}
@@ -303,53 +345,49 @@ void StartCompileProcess(string& processName, PROCESS_INFORMATION& pi) {
 
 int wmain(int argc, WCHAR *argv[])
 {
-	/*searchProcessesStop = false;
+	searchProcessesStop = false;
 	while (true) {
 		SearchProcessThread(NULL);
-	}*/
-
-	if (argc < 2) {
-		cout << "usage : csbuild [compiler] [flags]" << endl;
-		return -1;
 	}
 
-	searchProcessesStop = false;
+	//if (argc < 2) {
+	//	cout << "usage : " << endl;
+	//	return -1;
+	//}
 
-	// make thread
-	//thread toThread(&SearchProcessThread);
-	//toThread.detach();
-	DWORD searchThreadID = 0;
-	HANDLE searchThreadHandle = CreateThread(NULL, 0, SearchProcessThread, NULL, 0, &searchThreadID);
-	if (searchThreadHandle == NULL) {
-		cout << "CreateThread() failed, error : " << GetLastError() << endl;
-	}
-	if (CloseHandle(searchThreadHandle) == 0) {
-		cout << "Handle to thread close error : " << GetLastError() << endl;
-	}
+	//searchProcessesStop = false;
 
-	// argv[1] parse
-	wstring ws(argv[1]);
-	string tmp(ws.begin(), ws.end());
-	string processName = ToUpperCase(tmp);
+	//// make thread
+	////thread toThread(&SearchProcessThread);
+	////toThread.detach();
+	//DWORD searchThreadID = 0;
+	//HANDLE searchThreadHandle = CreateThread(NULL, 0, SearchProcessThread, NULL, 0, &searchThreadID);
+	//if (searchThreadHandle == NULL) {
+	//	cout << "CreateThread() failed, error : " << GetLastError() << endl;
+	//}
+	//if (CloseHandle(searchThreadHandle) == 0) {
+	//	cout << "Handle to thread close error : " << GetLastError() << endl;
+	//}
 
-	for (int i = 2; i < argc; i++) {
-		wstring ws(argv[i]);
-		string test(ws.begin(), ws.end());
-		if (test[0] == '/' || test[0] == '-') {
-			processName.append(" ");
-			processName.append(test);
-		} else {
-			processName.append(" \"");
-			processName.append(test);
-			processName.append("\"");
-		}
-			
-	}
+	//// argv[1] parse
+	//wstring ws(argv[1]);
+	//string tmp(ws.begin(), ws.end());
+	//string processName = ToUpperCase(tmp);
 
-	//make process argv[1]
-	PROCESS_INFORMATION pi;	
-	StartCompileProcess(processName, pi);
-	WaitForSingleObject(pi.hProcess, INFINITE);
-	searchProcessesStop = true;
+	//if (IsInterestProcessByName(processName)) {
+	//	for (int i = 2; i < argc; i++) {
+	//		wstring ws(argv[i]);
+	//		string test(ws.begin(), ws.end());
+	//		processName.append(" \"");
+	//		processName.append(test);
+	//		processName.append("\"");
+	//	}
+	//	PROCESS_INFORMATION pi;
+
+	//	StartCompileProcess(processName, pi);
+	//	WaitForSingleObject(pi.hProcess, INFINITE);
+	//	searchProcessesStop = true;
+	//}
+	////make process argv[1]
 			
 }
