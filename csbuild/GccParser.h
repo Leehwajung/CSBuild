@@ -9,7 +9,7 @@
 using namespace std;
 
 const vector<string> COMPILER_NAMES = { "GCC", "G++" };
-const vector<string> SOURCE_FILE_EXTENSIONS = { ".CPP", ".C" };
+const vector<string> SOURCE_FILE_EXTENSIONS = { "CPP", "C" };
 
 
 class GccParser
